@@ -125,35 +125,39 @@ async fn test_stream_msg_replayed_on_connect() -> io::Result<()> {
 async fn test_halfopen_streams() -> io::Result<()> {
     let aid = 66;
     let bid = 77;
-    let a = UdxSocket::bind("127.0.0.1:0")?;
-    let b = UdxSocket::bind("127.0.0.1:0")?;
+    let a_socket = UdxSocket::bind("127.0.0.1:0")?;
+    let b_socket = UdxSocket::bind("127.0.0.1:0")?;
 
-    let mut bstr = b.connect(a.local_addr()?, bid, aid)?;
-    bstr.write_all(b"AAA").await?;
-    let (_, _x) = a.recv().await?;
-    dbg!(_x);
+    // `b` creates a stream
+    let mut b_stream = b_socket.connect(a_socket.local_addr()?, bid, aid)?;
+    // `b_stream` sends a stream message to `a`'s address with `aid`.
+    b_stream.write_all(b"AAA").await?;
 
-    let a_half_str = a.create_stream(aid)?;
+    let (_, _x) = a_socket.recv().await?;
+    // `a` receives socket message, despite `b` sending stream message, because `a` does not yet have a stream with id = `aid`
+    assert!(_x != b"AAA");
 
-    bstr.write_all(b"BBB").await?;
+    let a_half_str = a_socket.create_stream(aid)?;
+
+    b_stream.write_all(b"BBB").await?;
 
     // b_stream message not seen as socket message to a bc a_stream is half open
     assert!(
-        tokio::time::timeout(Duration::from_millis(100), a.recv())
+        tokio::time::timeout(Duration::from_millis(100), a_socket.recv())
             .await
             .is_err()
     );
 
-    let mut astr = a_half_str.connect(b.local_addr()?, bid)?;
-    bstr.write_all(b"CCC").await?;
+    let mut a_stream = a_half_str.connect(b_socket.local_addr()?, bid)?;
+    b_stream.write_all(b"CCC").await?;
     // b_stream message not seen as socket message to a bc a_stream is open
     assert!(
-        tokio::time::timeout(Duration::from_millis(100), a.recv())
+        tokio::time::timeout(Duration::from_millis(100), a_socket.recv())
             .await
             .is_err()
     );
     let mut buf = vec![];
-    astr.read_buf(&mut buf).await?;
+    a_stream.read_buf(&mut buf).await?;
     assert_eq!(&buf, b"AAABBBCCC");
     Ok(())
 }
