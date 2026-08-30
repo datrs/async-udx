@@ -46,6 +46,17 @@ impl UdpState {
         imp::udp_state()
     }
 
+    /// State reporting a caller-chosen GSO limit instead of probing the platform.
+    ///
+    /// For transports that are not a kernel socket and so have no platform to probe. A
+    /// simulated network wants `1`, which stops the sender from building multi-segment
+    /// transmits it would then have to split apart again.
+    pub fn with_max_gso_segments(max_gso_segments: usize) -> Self {
+        Self {
+            max_gso_segments: AtomicUsize::new(max_gso_segments),
+        }
+    }
+
     /// The maximum amount of segments which can be transmitted if a platform
     /// supports Generic Send Offload (GSO).
     ///

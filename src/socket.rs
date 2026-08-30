@@ -27,6 +27,7 @@ use crate::constants::UDX_MTU;
 use crate::mutex::Mutex;
 use crate::packet::{Dgram, Header, IncomingPacket, PacketSet};
 use crate::stream::UdxStream;
+use crate::transport::Transport;
 use crate::udp::{BATCH_SIZE, RecvMeta, Transmit, UdpSocket, UdpState};
 
 const MAX_LOOP: usize = 60;
@@ -75,7 +76,19 @@ impl UdxSocket {
     /// look like `127.0.0.1:8080` which creates a socket on port `8080`. To connect to any random
     /// port pass `:0` as the port.
     pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
-        let inner = UdxSocketInner::bind(addr)?;
+        Ok(Self::spawn_driving(UdxSocketInner::bind(addr)?))
+    }
+
+    /// Run udx over a [`Transport`] of your own rather than a kernel UDP socket.
+    ///
+    /// Everything above this point is unchanged: the socket, its streams, congestion
+    /// control and retransmission all behave exactly as they do on a real socket. Only
+    /// where the datagrams go is different.
+    pub fn with_transport(transport: impl Transport) -> Self {
+        Self::spawn_driving(UdxSocketInner::with_transport(Box::new(transport)))
+    }
+
+    fn spawn_driving(inner: UdxSocketInner) -> Self {
         let socket = Self(Arc::new(Mutex::new(inner)));
         let driver = SocketDriver(socket.clone());
         tokio::spawn(async {
@@ -83,7 +96,7 @@ impl UdxSocket {
                 tracing::error!("Socket I/O error: {}", e);
             }
         });
-        Ok(socket)
+        socket
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -267,7 +280,7 @@ enum MaybeOpenStream {
 }
 
 pub struct UdxSocketInner {
-    socket: UdpSocket,
+    socket: Box<dyn Transport>,
     send_rx: Receiver<EventOutgoing>,
     send_tx: Sender<EventOutgoing>,
     streams: HashMap<u32, MaybeOpenStream>,
@@ -342,16 +355,22 @@ impl SocketStats {
 impl UdxSocketInner {
     pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
         let socket = std::net::UdpSocket::bind(addr)?;
-        let socket = UdpSocket::from_std(socket)?;
+        Ok(Self::with_transport(Box::new(UdpSocket::from_std(socket)?)))
+    }
+
+    pub fn with_transport(socket: Box<dyn Transport>) -> Self {
         let (send_tx, send_rx) = mpsc::unbounded_channel();
         let recv_buf = vec![0; UDX_MTU * BATCH_SIZE];
-        Ok(Self {
+        Self {
+            // Batching is sized by what the transport says it can do, not by what the
+            // platform can do, so a transport that is not a kernel socket is not handed
+            // GSO transmits it would have to take apart again.
+            udp_state: Arc::new(socket.udp_state()),
             socket,
             send_rx,
             send_tx,
             streams: HashMap::new(),
             recv_buf: Some(recv_buf.into()),
-            udp_state: Arc::new(UdpState::new()),
             outgoing_transmits: VecDeque::with_capacity(BATCH_SIZE),
             outgoing_packet_sets: VecDeque::with_capacity(BATCH_SIZE),
             stats: SocketStats::default(),
@@ -360,7 +379,7 @@ impl UdxSocketInner {
             send_overflow_timer: None,
             recv_waker: None,
             recv_dgrams: VecDeque::new(),
-        })
+        }
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
