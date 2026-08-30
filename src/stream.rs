@@ -828,6 +828,6 @@ impl AsyncRead for UdxStreamInner {
 impl Debug for UdxStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let inner = self.0.lock("UdxStream::debug");
-        write!(f, "{:#?}", &*inner)
+        write!(f, "{:#?}", *inner)
     }
 }

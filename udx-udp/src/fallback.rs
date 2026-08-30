@@ -17,6 +17,9 @@ use super::{log_sendmsg_error, RecvMeta, Transmit, UdpState, IO_ERROR_LOG_INTERV
 pub struct UdpSocket {
     io: tokio::net::UdpSocket,
     last_send_error: Instant,
+    /// TTL currently set on the socket. This platform has no control messages, so the hop
+    /// budget is a socket-level setting and we only pay for `set_ttl` when it changes.
+    last_ttl: Option<u8>,
 }
 
 impl UdpSocket {
@@ -26,6 +29,7 @@ impl UdpSocket {
         Ok(UdpSocket {
             io: tokio::net::UdpSocket::from_std(socket)?,
             last_send_error: now.checked_sub(2 * IO_ERROR_LOG_INTERVAL).unwrap_or(now),
+            last_ttl: None,
         })
     }
 
@@ -37,6 +41,14 @@ impl UdpSocket {
     ) -> Poll<Result<usize, io::Error>> {
         let mut sent = 0;
         for transmit in transmits {
+            if self.last_ttl != Some(transmit.ttl) {
+                match self.io.set_ttl(u32::from(transmit.ttl)) {
+                    Ok(()) => self.last_ttl = Some(transmit.ttl),
+                    // Same partial-success convention as a failed send below.
+                    Err(_) if sent != 0 => return Poll::Ready(Ok(sent)),
+                    Err(e) => return Poll::Ready(Err(e)),
+                }
+            }
             match self
                 .io
                 .poll_send_to(cx, &transmit.contents, transmit.destination)

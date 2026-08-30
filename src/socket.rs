@@ -21,6 +21,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver as Receiver, UnboundedSender as 
 use tokio::time::Sleep;
 use tracing::{debug, trace};
 
+use crate::constants::UDX_DEFAULT_TTL;
 use crate::constants::UDX_HEADER_SIZE;
 use crate::constants::UDX_MTU;
 use crate::mutex::Mutex;
@@ -119,7 +120,15 @@ impl UdxSocket {
     }
 
     pub fn send(&self, dest: SocketAddr, buf: &[u8]) {
-        let dgram = Dgram::new(dest, buf.to_vec());
+        self.send_with_ttl(dest, buf, UDX_DEFAULT_TTL)
+    }
+
+    /// Send a datagram with an explicit hop budget.
+    ///
+    /// See [`Dgram::with_ttl`]. Holepunching uses a low TTL to open a local NAT binding
+    /// without the packet reaching the peer.
+    pub fn send_with_ttl(&self, dest: SocketAddr, buf: &[u8], ttl: u8) {
+        let dgram = Dgram::new(dest, buf.to_vec()).with_ttl(ttl);
         let ev = EventOutgoing::TransmitDgram(dgram);
         self.0.lock("UdxSocket::send").send_tx.send(ev).unwrap();
     }

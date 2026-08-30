@@ -104,9 +104,10 @@ fn init(io: &std::net::UdpSocket) -> io::Result<()> {
             unsafe { libc::CMSG_SPACE(mem::size_of::<libc::in6_pktinfo>() as _) as usize };
     }
 
+    // Two `c_int` control messages: the ECN codepoint and the TTL / hop limit.
     assert!(
         CMSG_LEN
-            >= unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as _) as usize }
+            >= 2 * unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as _) as usize }
                 + cmsg_platform_space
     );
     assert!(
@@ -427,7 +428,13 @@ pub fn udp_state() -> UdpState {
     }
 }
 
-const CMSG_LEN: usize = 88;
+/// Space for the control messages attached to a single datagram.
+///
+/// On a 64-bit platform each `CMSG_SPACE` is the 16-byte header plus the payload rounded up
+/// to 8. Worst case when sending is ECN + TTL + GSO segment size + pktinfo:
+/// `24 + 24 + 24 + 40 = 112`. Receiving is smaller. The `init` assertion checks this
+/// holds on the target platform.
+const CMSG_LEN: usize = 112;
 
 fn prepare_msg(
     transmit: &Transmit,
@@ -455,10 +462,14 @@ fn prepare_msg(
     hdr.msg_controllen = CMSG_LEN as _;
     let mut encoder = unsafe { cmsg::Encoder::new(hdr) };
     let ecn = transmit.ecn.map_or(0, |x| x as libc::c_int);
+    // Both IP_TTL and IPV6_HOPLIMIT take an int, not a u8.
+    let ttl = libc::c_int::from(transmit.ttl);
     if transmit.destination.is_ipv4() {
         encoder.push(libc::IPPROTO_IP, libc::IP_TOS, ecn as IpTosTy);
+        encoder.push(libc::IPPROTO_IP, libc::IP_TTL, ttl);
     } else {
         encoder.push(libc::IPPROTO_IPV6, libc::IPV6_TCLASS, ecn);
+        encoder.push(libc::IPPROTO_IPV6, libc::IPV6_HOPLIMIT, ttl);
     }
 
     if let Some(segment_size) = transmit.segment_size {

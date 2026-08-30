@@ -6,17 +6,36 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::{io, net::SocketAddr, sync::atomic::AtomicUsize};
 use udx_udp::Transmit;
 
-use crate::constants::{UDX_HEADER_SIZE, UDX_MAGIC_BYTE, UDX_VERSION};
+use crate::constants::{UDX_DEFAULT_TTL, UDX_HEADER_SIZE, UDX_MAGIC_BYTE, UDX_VERSION};
 
 #[derive(Debug)]
 pub struct Dgram {
     pub buf: Vec<u8>,
     pub dest: SocketAddr,
+    /// Hop budget to send this datagram with.
+    ///
+    /// Only meaningful on the outgoing path. `Dgram` is also used to carry received
+    /// datagrams, and those keep the default here because we don't read the TTL off
+    /// incoming packets.
+    pub ttl: u8,
 }
 
 impl Dgram {
     pub fn new(dest: SocketAddr, buf: Vec<u8>) -> Self {
-        Self { dest, buf }
+        Self {
+            dest,
+            buf,
+            ttl: UDX_DEFAULT_TTL,
+        }
+    }
+    /// Send with a hop budget other than [`UDX_DEFAULT_TTL`].
+    ///
+    /// Holepunching needs this: its first punch rounds go out at a low TTL so they open the
+    /// local NAT binding but expire in transit, before the remote's firewall sees an
+    /// unsolicited inbound packet.
+    pub fn with_ttl(mut self, ttl: u8) -> Self {
+        self.ttl = ttl;
+        self
     }
     pub fn into_transmit(self) -> Transmit {
         Transmit {
@@ -25,6 +44,7 @@ impl Dgram {
             ecn: None,
             src_ip: None,
             contents: self.buf,
+            ttl: self.ttl,
         }
     }
 }
@@ -127,6 +147,7 @@ impl PacketSet {
                         1 => None,
                         _ => Some(segment_size),
                     },
+                    ttl: UDX_DEFAULT_TTL,
                 }
                 // self
                 // .packets
@@ -216,6 +237,7 @@ impl From<Packet> for Transmit {
             destination: packet.dest,
             segment_size: None,
             contents: packet.buf.into_vec(),
+            ttl: UDX_DEFAULT_TTL,
         }
     }
 }
@@ -262,6 +284,7 @@ impl Packet {
             destination: self.dest,
             segment_size: None,
             contents: self.buf.as_slice().to_vec(),
+            ttl: UDX_DEFAULT_TTL,
         }
     }
 }
