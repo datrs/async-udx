@@ -18,7 +18,7 @@ pub const UDX_MAX_DATA_SIZE: usize = 1380;
 pub const UDX_MAGIC_BYTE: u8 = 255;
 pub const UDX_VERSION: u8 = 1;
 
-pub const UDX_DEFAULT_TTL: u32 = 64;
+pub const UDX_DEFAULT_TTL: u8 = 64;
 pub const UDX_MSS: usize = 1460;
 
 pub const UDX_MTU: usize = 1400; // TODO: 1200

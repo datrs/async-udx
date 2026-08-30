@@ -14,6 +14,8 @@ pub struct Transmit {
     pub segment_size: Option<usize>,
     /// Optional source IP address for the datagram
     pub src_ip: Option<IpAddr>,
+    /// Number of hops before death
+    pub ttl: u8,
 }
 
 impl Transmit {
@@ -33,6 +35,7 @@ impl fmt::Debug for Transmit {
             .field("contents", &format!("<buf len {}>", self.contents.len()))
             .field("segment_size", &self.segment_size)
             .field("src_ip", &self.src_ip)
+            .field("ttl", &self.ttl)
             .finish()
     }
 }

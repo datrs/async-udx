@@ -31,6 +31,8 @@ parking_lot = "0.12.1"
 criterion = { version = "0.4.0", features = ["async_tokio"] }
 tracing-subscriber = "0.3.16"
 pretty-bytes = "0.2.2"
+# tests/ttl.rs reads the IP_TTL control message off a received datagram
+libc = "0.2.69"
 
 [[bench]]
 name = "throughput"
